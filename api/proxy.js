@@ -1,26 +1,34 @@
 export default async function handler(req, res) {
   try {
     const target = req.query.url;
+
     if (!target) {
       return res.status(400).json({ error: "Missing target URL (?url=)" });
     }
 
-    // fetch target
+    // Always remove compression headers
+    const outgoingHeaders = { ...req.headers };
+    delete outgoingHeaders['accept-encoding'];
+
+    // Forward request to target URL
     const response = await fetch(target, {
       method: req.method,
-      headers: {
-        ...req.headers,
-        host: ""
-      },
-      body: req.method !== "GET" ? req.body : undefined
+      headers: outgoingHeaders,
+      body: req.method !== "GET" ? req.body : undefined,
+      redirect: "follow"
     });
 
-    // copy headers
+    // Copy headers but remove compression
     response.headers.forEach((value, key) => {
-      res.setHeader(key, value);
+      if (
+        key !== "content-encoding" &&
+        key !== "transfer-encoding"
+      ) {
+        res.setHeader(key, value);
+      }
     });
 
-    // CORS
+    // CORS Headers
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "*");
     res.setHeader(
@@ -28,10 +36,18 @@ export default async function handler(req, res) {
       "GET, POST, PUT, DELETE, OPTIONS"
     );
 
+    // Handle preflight
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+
+    // Read body as text to avoid decoding problems
     const text = await response.text();
-    res.status(response.status).send(text);
+
+    return res.status(response.status).send(text);
+
   } catch (err) {
-    res.status(500).json({
+    return res.status(500).json({
       error: err.message || "Proxy error"
     });
   }
