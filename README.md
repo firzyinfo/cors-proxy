@@ -1,0 +1,2 @@
+# cors-proxy
+allow corsw
