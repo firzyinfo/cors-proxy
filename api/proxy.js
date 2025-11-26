@@ -1,54 +1,51 @@
 export default async function handler(req, res) {
   try {
+    // 1. Extract target URL
     const target = req.query.url;
-
     if (!target) {
       return res.status(400).json({ error: "Missing target URL (?url=)" });
     }
 
-    // Always remove compression headers
-    const outgoingHeaders = { ...req.headers };
-    delete outgoingHeaders['accept-encoding'];
+    // 2. Prepare outgoing headers
+    const headers = { ...req.headers };
 
-    // Forward request to target URL
-    const response = await fetch(target, {
-      method: req.method,
-      headers: outgoingHeaders,
-      body: req.method !== "GET" ? req.body : undefined,
-      redirect: "follow"
-    });
+    delete headers.host;
+    delete headers.origin;
+    delete headers.referer;
+    delete headers["accept-encoding"];  // SUPER IMPORTANT
+    delete headers["content-length"];
 
-    // Copy headers but remove compression
-    response.headers.forEach((value, key) => {
-      if (
-        key !== "content-encoding" &&
-        key !== "transfer-encoding"
-      ) {
-        res.setHeader(key, value);
-      }
-    });
-
-    // CORS Headers
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET, POST, PUT, DELETE, OPTIONS"
-    );
-
-    // Handle preflight
+    // 3. Handle Preflight
     if (req.method === "OPTIONS") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
       return res.status(200).end();
     }
 
-    // Read body as text to avoid decoding problems
+    // 4. Forward request to target WooCommerce API
+    const response = await fetch(target, {
+      method: req.method,
+      headers,
+      body: req.method === "GET" ? undefined : req.body, 
+      redirect: "follow"
+    });
+
+    // 5. Read as text to avoid decompression issues
     const text = await response.text();
 
-    return res.status(response.status).send(text);
+    // 6. Apply proxy CORS headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+
+    // 7. Prevent encoding mismatches
+    res.removeHeader("content-encoding");
+    res.removeHeader("transfer-encoding");
+
+    res.status(response.status).send(text);
 
   } catch (err) {
-    return res.status(500).json({
-      error: err.message || "Proxy error"
-    });
+    res.status(500).json({ error: err.message || "Proxy error" });
   }
 }
